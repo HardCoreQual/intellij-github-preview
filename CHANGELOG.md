@@ -1,6 +1,6 @@
 # IntelliJ IDEA Git QuickView Plugin Changelog
 
-## [Released]
+## [1.0.0]
 
 ### Added
 
