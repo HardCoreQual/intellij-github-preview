@@ -3,6 +3,8 @@ import com.intellij.ide.RecentProjectsManager;
 import com.intellij.ide.impl.ProjectUtil;
 import com.intellij.openapi.actionSystem.AnActionEvent;
 import com.intellij.openapi.application.ApplicationManager;
+import com.intellij.openapi.progress.ProgressManager;
+import com.intellij.openapi.progress.Task;
 import com.intellij.openapi.project.DumbAwareAction;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.project.ProjectManager;
@@ -30,21 +32,9 @@ public class GitQuickViewAction extends DumbAwareAction {
         );
 
         File tempDir = createTempDirectory();
-        Log.info("Successfully created temporary directory");
+        Log.info("Temporary directory created successfully");
 
-        cloneGitRepo(gitUrl, tempDir);
-        Log.info("Successfully cloned the repository in the temporary directory: " + tempDir.getAbsolutePath());
-
-        File repoDir = getRepoDirectory(tempDir);
-        String repoPath = repoDir.getAbsolutePath();
-
-        Project newProject = ProjectUtil.openOrImport(repoPath, currentProject, true);
-        Log.info("Successfully opened the project in directory: " + repoPath);
-
-        cleanUpOnProjectClose(newProject, tempDir);
-
-        removeProjectFromRecentList(repoPath);
-        Log.info("Successfully removed the project from the recent projects list");
+        cloneRepositoryAndOpenProject(currentProject, gitUrl, tempDir);
     }
 
     private File createTempDirectory() {
@@ -55,18 +45,40 @@ public class GitQuickViewAction extends DumbAwareAction {
         }
     }
 
-    private void cloneGitRepo(String gitUrl, File tempDir) {
-        try {
-            ProcessBuilder pb = new ProcessBuilder("git", "clone", "--depth", "1", gitUrl);
-            pb.directory(tempDir);
-            Process p = pb.start();
-            p.waitFor();
-        } catch (IOException | InterruptedException ex) {
-            throw new RuntimeException("Failed to clone git repository", ex);
-        }
+    private void cloneRepositoryAndOpenProject(Project project, String gitUrl, File tempDir) {
+        ProgressManager.getInstance().run(new Task.Backgroundable(project, "Cloning Git repository", false) {
+            @Override
+            public void run(@NotNull com.intellij.openapi.progress.ProgressIndicator indicator) {
+                try {
+                    cloneGitRepository(gitUrl, tempDir);
+                    Log.info("Git repository cloned successfully to: " + tempDir.getAbsolutePath());
+
+                    File repositoryDirectory = locateGitRepository(tempDir);
+                    String repoPath = repositoryDirectory.getAbsolutePath();
+
+                    Project newProject = openProjectInIDEA(repoPath, project);
+                    Log.info("Project opened successfully in directory: " + repoPath);
+
+                    registerProjectCleanupOnClose(newProject, tempDir);
+
+                    removeFromRecentProjectsList(repoPath);
+                    Log.info("Project removed from the recent projects list");
+
+                } catch (IOException | InterruptedException ex) {
+                    throw new RuntimeException("Failed to clone git repository", ex);
+                }
+            }
+        });
     }
 
-    private File getRepoDirectory(File tempDir) {
+    private void cloneGitRepository(String gitUrl, File tempDir) throws IOException, InterruptedException {
+        ProcessBuilder pb = new ProcessBuilder("git", "clone", "--depth", "1", gitUrl);
+        pb.directory(tempDir);
+        Process p = pb.start();
+        p.waitFor();
+    }
+
+    private File locateGitRepository(File tempDir) {
         File[] files = tempDir.listFiles();
 
         return Arrays.stream(files)
@@ -75,29 +87,37 @@ public class GitQuickViewAction extends DumbAwareAction {
                 .orElseThrow(() -> new RuntimeException("No directory found in tempDir"));
     }
 
-    private void cleanUpOnProjectClose(Project newProject, File tempDir) {
+    private Project openProjectInIDEA(String repoPath, Project currentProject) {
+        return ProjectUtil.openOrImport(repoPath, currentProject, true);
+    }
+
+    private void registerProjectCleanupOnClose(Project newProject, File tempDir) {
         MessageBusConnection connection = ApplicationManager.getApplication().getMessageBus().connect();
 
         connection.subscribe(ProjectManager.TOPIC, new ProjectManagerListener() {
             @Override
             public void projectClosing(@NotNull Project project) {
                 if (project.equals(newProject)) {
-                    new Thread(() -> {
-                        try {
-                            Thread.sleep(2000); // Sleep for a bit to give IntelliJ time to finish its operations
-                            Files.delete(tempDir.toPath());
-                            Log.info("Successfully deleted the temporary directory: " + tempDir.getAbsolutePath());
-                        } catch (InterruptedException | IOException e) {
-                            e.printStackTrace();
-                        }
-                    }).start();
+                    scheduleProjectDirectoryDeletion(tempDir);
                     connection.disconnect();
                 }
             }
         });
     }
 
-    private void removeProjectFromRecentList(String repoPath) {
+    private void scheduleProjectDirectoryDeletion(File tempDir) {
+        new Thread(() -> {
+            try {
+                Thread.sleep(2000); // Sleep for a bit to give IntelliJ time to finish its operations
+                Files.delete(tempDir.toPath());
+                Log.info("Temporary directory deleted successfully: " + tempDir.getAbsolutePath());
+            } catch (InterruptedException | IOException e) {
+                e.printStackTrace();
+            }
+        }).start();
+    }
+
+    private void removeFromRecentProjectsList(String repoPath) {
         RecentProjectsManager manager = RecentProjectsManager.getInstance();
         manager.removePath(repoPath);
     }
