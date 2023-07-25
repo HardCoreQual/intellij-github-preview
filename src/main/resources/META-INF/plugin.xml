@@ -15,10 +15,7 @@
             <action id="GitQuickView.OpenFromGit" class="GitQuickViewAction"
                     text="Open for QuickView..." description="Open a Git repository in a new window and remove by closing the window."
                     icon="AllIcons.Vcs.Branch">
-                <!--            TODO: fix add after OpenFile -->
-<!--                <add-to-group group-id="MainMenu.FileMenu.FileOpenGroup" anchor="after" relative-to-action="OpenFile" />-->
                 <add-to-group group-id="FileOpenGroup" anchor="after" relative-to-action="OpenFile" />
-<!--                <add-to-group group-id="FileMenu" anchor="last" />-->
             </action>
         </group>
     </actions>
